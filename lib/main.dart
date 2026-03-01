@@ -259,6 +259,7 @@ class _HomePageState extends State<HomePage> {
   static const _backgroundMusicEnabledKey = 'background_music_enabled';
   static const _backgroundMusicSourceKey = 'background_music_source';
   static const _backgroundMusicVolumeKey = 'background_music_volume';
+  static const _autoPauseDurationKey = 'auto_pause_duration_seconds';
   static const List<String> _fallbackBuiltInAudioPaths = [
     'audio/transitive/meditation_inhale.wav',
     'audio/transitive/meditation_exhale.wav',
@@ -320,6 +321,10 @@ class _HomePageState extends State<HomePage> {
       'enableBackgroundMusic': '启用背景音乐',
       'backgroundMusicSource': '背景音乐源',
       'backgroundMusicVolume': '背景音乐音量',
+      'autoPauseTimer': '自动暂停计时',
+      'autoPauseAfter': '暂停练习于',
+      'autoPauseRemaining': '自动暂停剩余',
+      'noAutoPause': '不自动暂停',
       'chinese': '中文',
       'english': 'English',
       'localFilePrefix': '本地文件',
@@ -393,6 +398,10 @@ class _HomePageState extends State<HomePage> {
       'enableBackgroundMusic': 'Enable background music',
       'backgroundMusicSource': 'Background music source',
       'backgroundMusicVolume': 'Background music volume',
+      'autoPauseTimer': 'Auto-pause timer',
+      'autoPauseAfter': 'Pause exercise after',
+      'autoPauseRemaining': 'Auto-pause remaining',
+      'noAutoPause': 'No auto-pause',
       'chinese': 'Chinese',
       'english': 'English',
       'localFilePrefix': 'Local file',
@@ -423,6 +432,8 @@ class _HomePageState extends State<HomePage> {
   bool _backgroundMusicEnabled = false;
   String _backgroundMusicSource = 'audio/background/wiki_light_rainfall.ogg';
   double _backgroundMusicVolume = 0.35;
+  int? _autoPauseDurationSeconds;
+  int? _autoPauseRemainingSeconds;
   bool _isRunning = false;
   BreathPhase _phase = BreathPhase.inhale;
   int _remainingSeconds = 0;
@@ -471,12 +482,18 @@ class _HomePageState extends State<HomePage> {
     final backgroundMusicEnabled = prefs.getBool(_backgroundMusicEnabledKey);
     final backgroundMusicSource = prefs.getString(_backgroundMusicSourceKey);
     final backgroundMusicVolume = prefs.getDouble(_backgroundMusicVolumeKey);
+    final autoPauseDuration = prefs.getInt(_autoPauseDurationKey);
     _language = _parseLanguage(languageCode);
     _backgroundMusicEnabled = backgroundMusicEnabled ?? false;
     _backgroundMusicSource = _normalizeMusicAsset(
       backgroundMusicSource ?? 'audio/background/wiki_light_rainfall.ogg',
     );
     _backgroundMusicVolume = (backgroundMusicVolume ?? 0.35).clamp(0.0, 1.0);
+    _autoPauseDurationSeconds =
+        (autoPauseDuration != null && autoPauseDuration > 0)
+            ? autoPauseDuration
+            : null;
+    _autoPauseRemainingSeconds = _autoPauseDurationSeconds;
     var shouldSave = false;
 
     if (saved == null) {
@@ -625,6 +642,11 @@ class _HomePageState extends State<HomePage> {
     await prefs.setBool(_backgroundMusicEnabledKey, _backgroundMusicEnabled);
     await prefs.setString(_backgroundMusicSourceKey, _backgroundMusicSource);
     await prefs.setDouble(_backgroundMusicVolumeKey, _backgroundMusicVolume);
+    if (_autoPauseDurationSeconds == null) {
+      await prefs.remove(_autoPauseDurationKey);
+    } else {
+      await prefs.setInt(_autoPauseDurationKey, _autoPauseDurationSeconds!);
+    }
   }
 
   String t(String key) {
@@ -742,8 +764,71 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  bool get _useSingleChannelOnThisPlatform {
+    return !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  }
+
+  Future<void> _playSourceOnPlayer({
+    required AudioPlayer player,
+    required String source,
+    required ReleaseMode releaseMode,
+    required double volume,
+  }) async {
+    await player.stop();
+    await player.setReleaseMode(releaseMode);
+    await player.setVolume(volume);
+    if (_isFileMusic(source)) {
+      final filePath = _decodeFileUri(source);
+      await player.play(DeviceFileSource(filePath));
+    } else {
+      await player.play(AssetSource(source));
+    }
+    await player.setVolume(volume);
+  }
+
+  Future<void> _playSingleChannelForCurrentPhase() async {
+    if (!_isRunning) {
+      return;
+    }
+    final phaseSource = _phaseMusicAsset(_phase);
+    try {
+      if (phaseSource != null && phaseSource.isNotEmpty) {
+        await _playSourceOnPlayer(
+          player: _audioPlayer,
+          source: phaseSource,
+          releaseMode: _phaseShouldRepeat(_phase)
+              ? ReleaseMode.loop
+              : ReleaseMode.release,
+          volume: _phaseVolume(_phase),
+        );
+        return;
+      }
+
+      if (_backgroundMusicEnabled && _backgroundMusicSource.isNotEmpty) {
+        final bg = _normalizeMusicAsset(_backgroundMusicSource);
+        if (bg.isNotEmpty) {
+          await _playSourceOnPlayer(
+            player: _audioPlayer,
+            source: bg,
+            releaseMode: ReleaseMode.loop,
+            volume: _backgroundMusicVolume,
+          );
+          return;
+        }
+      }
+
+      await _audioPlayer.stop();
+    } catch (e) {
+      debugPrint('Failed single-channel playback switch: $e');
+    }
+  }
+
   Future<void> _startBackgroundMusic() async {
     if (!_backgroundMusicEnabled) {
+      return;
+    }
+    if (_useSingleChannelOnThisPlatform) {
+      await _playSingleChannelForCurrentPhase();
       return;
     }
     final source = _normalizeMusicAsset(_backgroundMusicSource);
@@ -775,6 +860,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _syncBackgroundMusicLevel(BreathPhase phase) async {
+    if (_useSingleChannelOnThisPlatform) {
+      return;
+    }
     if (!_backgroundMusicEnabled || !_isRunning) {
       return;
     }
@@ -918,20 +1006,40 @@ class _HomePageState extends State<HomePage> {
     }
     setState(() {
       _isRunning = true;
+      if (_autoPauseDurationSeconds != null &&
+          (_autoPauseRemainingSeconds == null || _autoPauseRemainingSeconds! <= 0)) {
+        _autoPauseRemainingSeconds = _autoPauseDurationSeconds;
+      }
     });
-    unawaited(_startBackgroundMusic());
-    unawaited(_playPhaseMusic(_phase));
+    if (_useSingleChannelOnThisPlatform) {
+      unawaited(_playSingleChannelForCurrentPhase());
+    } else {
+      unawaited(_startBackgroundMusic());
+      unawaited(_playPhaseMusic(_phase));
+    }
 
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) {
         return;
       }
+      var shouldPause = false;
       setState(() {
         _remainingSeconds -= 1;
         if (_remainingSeconds <= 0) {
           _nextPhase();
         }
+        if (_autoPauseDurationSeconds != null) {
+          final current = _autoPauseRemainingSeconds ?? _autoPauseDurationSeconds!;
+          _autoPauseRemainingSeconds =
+              (current - 1).clamp(0, 1 << 20).toInt();
+          if (_autoPauseRemainingSeconds == 0) {
+            shouldPause = true;
+          }
+        }
       });
+      if (shouldPause) {
+        _pauseSession();
+      }
     });
   }
 
@@ -957,6 +1065,7 @@ class _HomePageState extends State<HomePage> {
     _isRunning = false;
     _phase = BreathPhase.inhale;
     _remainingSeconds = _activePreset.inhaleSeconds;
+    _autoPauseRemainingSeconds = _autoPauseDurationSeconds;
   }
 
   void _nextPhase() {
@@ -970,7 +1079,11 @@ class _HomePageState extends State<HomePage> {
     }
     _remainingSeconds = _phaseDuration(_phase);
     if (_isRunning) {
-      unawaited(_playPhaseMusic(_phase));
+      if (_useSingleChannelOnThisPlatform) {
+        unawaited(_playSingleChannelForCurrentPhase());
+      } else {
+        unawaited(_playPhaseMusic(_phase));
+      }
     }
   }
 
@@ -1378,6 +1491,10 @@ class _HomePageState extends State<HomePage> {
     if (!_isRunning) {
       return;
     }
+    if (_useSingleChannelOnThisPlatform) {
+      await _playSingleChannelForCurrentPhase();
+      return;
+    }
     if (_backgroundMusicEnabled && _backgroundMusicSource.isNotEmpty) {
       await _startBackgroundMusic();
       await _syncBackgroundMusicLevel(_phase);
@@ -1392,6 +1509,10 @@ class _HomePageState extends State<HomePage> {
     });
     await _saveData();
     if (!_isRunning) {
+      return;
+    }
+    if (_useSingleChannelOnThisPlatform) {
+      await _playSingleChannelForCurrentPhase();
       return;
     }
     if (_backgroundMusicEnabled && _backgroundMusicSource.isNotEmpty) {
@@ -1410,7 +1531,19 @@ class _HomePageState extends State<HomePage> {
     if (!_isRunning || !_backgroundMusicEnabled) {
       return;
     }
+    if (_useSingleChannelOnThisPlatform) {
+      await _playSingleChannelForCurrentPhase();
+      return;
+    }
     await _syncBackgroundMusicLevel(_phase);
+  }
+
+  Future<void> _setAutoPauseDurationSeconds(int? seconds) async {
+    setState(() {
+      _autoPauseDurationSeconds = seconds;
+      _autoPauseRemainingSeconds = seconds;
+    });
+    await _saveData();
   }
 
   String _themeLabel(AppThemeSetting setting) {
@@ -1422,6 +1555,15 @@ class _HomePageState extends State<HomePage> {
       case AppThemeSetting.dark:
         return t('themeDark');
     }
+  }
+
+  String _formatDurationMmSs(int seconds) {
+    final clamped = seconds.clamp(0, 3600 * 24).toInt();
+    final minutes = clamped ~/ 60;
+    final remaining = clamped % 60;
+    final mm = minutes.toString().padLeft(2, '0');
+    final ss = remaining.toString().padLeft(2, '0');
+    return '$mm:$ss';
   }
 
   Widget _buildPresetTab() {
@@ -1543,6 +1685,52 @@ class _HomePageState extends State<HomePage> {
                   Text(
                     tf('patternPhaseMusic', {'music': _phaseMusic(_phase)}),
                   ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<int?>(
+                    value: _autoPauseDurationSeconds,
+                    decoration: InputDecoration(labelText: t('autoPauseAfter')),
+                    items: [
+                      DropdownMenuItem<int?>(
+                        value: null,
+                        child: Text(t('noAutoPause')),
+                      ),
+                      const DropdownMenuItem<int?>(
+                        value: 300,
+                        child: Text('5 min'),
+                      ),
+                      const DropdownMenuItem<int?>(
+                        value: 600,
+                        child: Text('10 min'),
+                      ),
+                      const DropdownMenuItem<int?>(
+                        value: 900,
+                        child: Text('15 min'),
+                      ),
+                      const DropdownMenuItem<int?>(
+                        value: 1200,
+                        child: Text('20 min'),
+                      ),
+                      const DropdownMenuItem<int?>(
+                        value: 1800,
+                        child: Text('30 min'),
+                      ),
+                      const DropdownMenuItem<int?>(
+                        value: 2700,
+                        child: Text('45 min'),
+                      ),
+                      const DropdownMenuItem<int?>(
+                        value: 3600,
+                        child: Text('60 min'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      unawaited(_setAutoPauseDurationSeconds(value));
+                    },
+                  ),
+                  if (_autoPauseDurationSeconds != null)
+                    Text(
+                      '${t('autoPauseRemaining')}: ${_formatDurationMmSs(_autoPauseRemainingSeconds ?? _autoPauseDurationSeconds!)}',
+                    ),
                 ],
               ),
             ),
