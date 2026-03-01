@@ -258,6 +258,7 @@ class _HomePageState extends State<HomePage> {
   static const _selectedPresetIndexKey = 'selected_preset_index';
   static const _backgroundMusicEnabledKey = 'background_music_enabled';
   static const _backgroundMusicSourceKey = 'background_music_source';
+  static const _backgroundMusicVolumeKey = 'background_music_volume';
   static const List<String> _fallbackBuiltInAudioPaths = [
     'audio/transitive/meditation_inhale.wav',
     'audio/transitive/meditation_exhale.wav',
@@ -318,6 +319,7 @@ class _HomePageState extends State<HomePage> {
       'backgroundMusic': '背景音乐',
       'enableBackgroundMusic': '启用背景音乐',
       'backgroundMusicSource': '背景音乐源',
+      'backgroundMusicVolume': '背景音乐音量',
       'chinese': '中文',
       'english': 'English',
       'localFilePrefix': '本地文件',
@@ -390,6 +392,7 @@ class _HomePageState extends State<HomePage> {
       'backgroundMusic': 'Background Music',
       'enableBackgroundMusic': 'Enable background music',
       'backgroundMusicSource': 'Background music source',
+      'backgroundMusicVolume': 'Background music volume',
       'chinese': 'Chinese',
       'english': 'English',
       'localFilePrefix': 'Local file',
@@ -419,6 +422,7 @@ class _HomePageState extends State<HomePage> {
   AppLanguage _language = AppLanguage.zh;
   bool _backgroundMusicEnabled = false;
   String _backgroundMusicSource = 'audio/background/wiki_light_rainfall.ogg';
+  double _backgroundMusicVolume = 0.35;
   bool _isRunning = false;
   BreathPhase _phase = BreathPhase.inhale;
   int _remainingSeconds = 0;
@@ -466,11 +470,13 @@ class _HomePageState extends State<HomePage> {
     final languageCode = prefs.getString(_languageKey);
     final backgroundMusicEnabled = prefs.getBool(_backgroundMusicEnabledKey);
     final backgroundMusicSource = prefs.getString(_backgroundMusicSourceKey);
+    final backgroundMusicVolume = prefs.getDouble(_backgroundMusicVolumeKey);
     _language = _parseLanguage(languageCode);
     _backgroundMusicEnabled = backgroundMusicEnabled ?? false;
     _backgroundMusicSource = _normalizeMusicAsset(
       backgroundMusicSource ?? 'audio/background/wiki_light_rainfall.ogg',
     );
+    _backgroundMusicVolume = (backgroundMusicVolume ?? 0.35).clamp(0.0, 1.0);
     var shouldSave = false;
 
     if (saved == null) {
@@ -618,6 +624,7 @@ class _HomePageState extends State<HomePage> {
     await prefs.setString(_languageKey, _language.code);
     await prefs.setBool(_backgroundMusicEnabledKey, _backgroundMusicEnabled);
     await prefs.setString(_backgroundMusicSourceKey, _backgroundMusicSource);
+    await prefs.setDouble(_backgroundMusicVolumeKey, _backgroundMusicVolume);
   }
 
   String t(String key) {
@@ -713,6 +720,7 @@ class _HomePageState extends State<HomePage> {
     final assetPath = _phaseMusicAsset(phase);
     final targetVolume = _phaseVolume(phase);
     try {
+      await _syncBackgroundMusicLevel(phase);
       await _audioPlayer.stop();
       if (assetPath == null) {
         await _audioPlayer.setReleaseMode(ReleaseMode.release);
@@ -745,6 +753,7 @@ class _HomePageState extends State<HomePage> {
     try {
       await _backgroundAudioPlayer.stop();
       await _backgroundAudioPlayer.setReleaseMode(ReleaseMode.loop);
+      await _backgroundAudioPlayer.setVolume(_backgroundMusicVolume);
       if (_isFileMusic(source)) {
         final filePath = _decodeFileUri(source);
         await _backgroundAudioPlayer.play(DeviceFileSource(filePath));
@@ -762,6 +771,21 @@ class _HomePageState extends State<HomePage> {
       await _backgroundAudioPlayer.stop();
     } catch (e) {
       debugPrint('Failed to stop audio: $e');
+    }
+  }
+
+  Future<void> _syncBackgroundMusicLevel(BreathPhase phase) async {
+    if (!_backgroundMusicEnabled || !_isRunning) {
+      return;
+    }
+    final phaseHasAudio = (_phaseMusicAsset(phase) ?? '').isNotEmpty;
+    final target = phaseHasAudio
+        ? (_backgroundMusicVolume * 0.35).clamp(0.0, 1.0).toDouble()
+        : _backgroundMusicVolume;
+    try {
+      await _backgroundAudioPlayer.setVolume(target);
+    } catch (e) {
+      debugPrint('Failed to set background volume: $e');
     }
   }
 
@@ -1356,6 +1380,7 @@ class _HomePageState extends State<HomePage> {
     }
     if (_backgroundMusicEnabled && _backgroundMusicSource.isNotEmpty) {
       await _startBackgroundMusic();
+      await _syncBackgroundMusicLevel(_phase);
     } else {
       await _backgroundAudioPlayer.stop();
     }
@@ -1371,9 +1396,21 @@ class _HomePageState extends State<HomePage> {
     }
     if (_backgroundMusicEnabled && _backgroundMusicSource.isNotEmpty) {
       await _startBackgroundMusic();
+      await _syncBackgroundMusicLevel(_phase);
     } else {
       await _backgroundAudioPlayer.stop();
     }
+  }
+
+  Future<void> _setBackgroundMusicVolume(double value) async {
+    setState(() {
+      _backgroundMusicVolume = value.clamp(0.0, 1.0).toDouble();
+    });
+    await _saveData();
+    if (!_isRunning || !_backgroundMusicEnabled) {
+      return;
+    }
+    await _syncBackgroundMusicLevel(_phase);
   }
 
   String _themeLabel(AppThemeSetting setting) {
@@ -1669,6 +1706,19 @@ class _HomePageState extends State<HomePage> {
                         unawaited(_setBackgroundMusicSource(value ?? ''));
                       },
                     );
+                  },
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '${t('backgroundMusicVolume')}: ${(_backgroundMusicVolume * 100).round()}%',
+                ),
+                Slider(
+                  value: _backgroundMusicVolume,
+                  min: 0,
+                  max: 1,
+                  divisions: 20,
+                  onChanged: (value) {
+                    unawaited(_setBackgroundMusicVolume(value));
                   },
                 ),
                 Align(

@@ -10,8 +10,9 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(find.text('呼吸练习APP'), findsOneWidget);
+    expect(find.text('呼吸练习'), findsOneWidget);
     expect(find.text('练习'), findsOneWidget);
     expect(find.text('预设'), findsOneWidget);
+    expect(find.text('设置'), findsOneWidget);
   });
 }
