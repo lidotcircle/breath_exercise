@@ -196,12 +196,14 @@ class BreathingPreset {
 }
 
 enum BreathPhase { inhale, exhale, pause }
-enum AppLanguage { zh, en }
+enum AppLanguage { system, zh, en }
 enum AppThemeSetting { auto, light, dark }
 
 extension on AppLanguage {
   String get code {
     switch (this) {
+      case AppLanguage.system:
+        return 'system';
       case AppLanguage.zh:
         return 'zh';
       case AppLanguage.en:
@@ -313,6 +315,7 @@ class _HomePageState extends State<HomePage> {
       'presets': '预设',
       'settings': '设置',
       'language': '语言',
+      'followSystem': '跟随系统',
       'theme': '主题',
       'themeAuto': '跟随时间（默认）',
       'themeLight': '浅色',
@@ -390,6 +393,7 @@ class _HomePageState extends State<HomePage> {
       'presets': 'Presets',
       'settings': 'Settings',
       'language': 'Language',
+      'followSystem': 'Follow system',
       'theme': 'Theme',
       'themeAuto': 'Auto by time (Default)',
       'themeLight': 'Light',
@@ -428,7 +432,7 @@ class _HomePageState extends State<HomePage> {
 
   int _selectedIndex = 0;
   int _tabIndex = 0;
-  AppLanguage _language = AppLanguage.zh;
+  AppLanguage _language = AppLanguage.system;
   bool _backgroundMusicEnabled = false;
   String _backgroundMusicSource = 'audio/background/wiki_light_rainfall.ogg';
   double _backgroundMusicVolume = 0.35;
@@ -663,7 +667,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   String t(String key) {
-    return _localizedText[_language]?[key] ?? key;
+    return _localizedText[_effectiveLanguage]?[key] ?? key;
   }
 
   String tf(String key, Map<String, String> replacements) {
@@ -680,7 +684,16 @@ class _HomePageState extends State<HomePage> {
         return language;
       }
     }
-    return AppLanguage.zh;
+    return AppLanguage.system;
+  }
+
+  AppLanguage get _effectiveLanguage {
+    if (_language != AppLanguage.system) {
+      return _language;
+    }
+    final code = WidgetsBinding.instance.platformDispatcher.locale.languageCode
+        .toLowerCase();
+    return code.startsWith('zh') ? AppLanguage.zh : AppLanguage.en;
   }
 
   BreathingPreset get _activePreset => _presets[_selectedIndex];
@@ -1720,6 +1733,10 @@ class _HomePageState extends State<HomePage> {
                 DropdownButtonFormField<AppLanguage>(
                   value: _language,
                   items: [
+                    DropdownMenuItem(
+                      value: AppLanguage.system,
+                      child: Text(t('followSystem')),
+                    ),
                     DropdownMenuItem(
                       value: AppLanguage.zh,
                       child: Text(t('chinese')),

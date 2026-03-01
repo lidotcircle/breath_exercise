@@ -4,7 +4,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   testWidgets('app renders main title', (tester) async {
-    SharedPreferences.setMockInitialValues(<String, Object>{});
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'app_language': 'zh',
+    });
 
     await tester.pumpWidget(const BreathingApp());
     await tester.pump();
