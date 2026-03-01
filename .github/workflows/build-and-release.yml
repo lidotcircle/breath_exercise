@@ -1,0 +1,59 @@
+name: Build And Release Flutter App
+
+on:
+  push:
+    branches:
+      - '**'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter Pub Get
+        run: flutter pub get
+
+      - name: Generate Android Platform Files
+        run: flutter create --platforms=android .
+
+      - name: Run Tests
+        run: flutter test
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Prepare Release Metadata
+        id: meta
+        run: |
+          SAFE_BRANCH=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
+          echo "tag=build-${SAFE_BRANCH}-latest" >> "$GITHUB_OUTPUT"
+          echo "name=${GITHUB_REF_NAME} latest build" >> "$GITHUB_OUTPUT"
+
+      - name: Publish To GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.name }}
+          prerelease: true
+          allowUpdates: true
+          replacesArtifacts: true
+          artifacts: build/app/outputs/flutter-apk/app-release.apk
+          artifactErrorsFailBuild: true
