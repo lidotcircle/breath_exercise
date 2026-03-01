@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -104,6 +105,16 @@ class _HomePageState extends State<HomePage> {
   int _remainingSeconds = 0;
   Timer? _timer;
 
+  static const BreathingPreset _defaultPreset = BreathingPreset(
+    name: '默认预设',
+    inhaleSeconds: 4,
+    exhaleSeconds: 4,
+    pauseSeconds: 2,
+    inhaleMusic: 'audio/calm_inhale.wav',
+    exhaleMusic: 'audio/calm_exhale.wav',
+  );
+  final AudioPlayer _audioPlayer = AudioPlayer();
+
   @override
   void initState() {
     super.initState();
@@ -113,6 +124,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _timer?.cancel();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -120,52 +132,89 @@ class _HomePageState extends State<HomePage> {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString(_presetsKey);
     final selected = prefs.getInt(_selectedPresetIndexKey);
+    var shouldSave = false;
 
     if (saved == null) {
-      _presets.add(
-        const BreathingPreset(
-          name: '默认预设',
-          inhaleSeconds: 4,
-          exhaleSeconds: 4,
-          pauseSeconds: 2,
-          inhaleMusic: 'calm_inhale.mp3',
-          exhaleMusic: 'calm_exhale.mp3',
-        ),
-      );
-      _selectedIndex = 0;
-      _resetSession();
-      await _saveData();
-      return;
-    }
-
-    final decoded = jsonDecode(saved) as List<dynamic>;
-    _presets
-      ..clear()
-      ..addAll(
-        decoded.map(
-          (item) => BreathingPreset.fromJson(
-            Map<String, dynamic>.from(item as Map),
-          ),
-        ),
-      );
-
-    if (_presets.isEmpty) {
-      _presets.add(
-        const BreathingPreset(
-          name: '默认预设',
-          inhaleSeconds: 4,
-          exhaleSeconds: 4,
-          pauseSeconds: 2,
-          inhaleMusic: 'calm_inhale.mp3',
-          exhaleMusic: 'calm_exhale.mp3',
-        ),
-      );
-      _selectedIndex = 0;
+      _setDefaultPreset();
+      shouldSave = true;
     } else {
-      _selectedIndex = (selected ?? 0).clamp(0, _presets.length - 1);
+      try {
+        final decoded = jsonDecode(saved);
+        if (decoded is! List) {
+          throw const FormatException('Preset payload must be a list.');
+        }
+        _presets
+          ..clear()
+          ..addAll(
+            decoded.map(
+              (item) => BreathingPreset.fromJson(
+                Map<String, dynamic>.from(item as Map),
+              ),
+            ),
+          );
+        var migrated = false;
+        for (var i = 0; i < _presets.length; i++) {
+          final preset = _presets[i];
+          final normalized = _normalizePresetMusic(preset);
+          if (normalized.inhaleMusic != preset.inhaleMusic ||
+              normalized.exhaleMusic != preset.exhaleMusic) {
+            _presets[i] = normalized;
+            migrated = true;
+          }
+        }
+
+        if (_presets.isEmpty) {
+          _setDefaultPreset();
+          shouldSave = true;
+        } else {
+          _selectedIndex = (selected ?? 0).clamp(0, _presets.length - 1);
+          shouldSave = shouldSave || migrated;
+        }
+      } catch (e) {
+        debugPrint('Failed to load presets from storage, resetting: $e');
+        _setDefaultPreset();
+        shouldSave = true;
+      }
     }
 
     _resetSession();
+    if (shouldSave) {
+      await _saveData();
+    }
+  }
+
+  void _setDefaultPreset() {
+    _presets
+      ..clear()
+      ..add(_defaultPreset);
+    _selectedIndex = 0;
+  }
+
+  BreathingPreset _normalizePresetMusic(BreathingPreset preset) {
+    return preset.copyWith(
+      inhaleMusic: _normalizeMusicAsset(preset.inhaleMusic),
+      exhaleMusic: _normalizeMusicAsset(preset.exhaleMusic),
+    );
+  }
+
+  String _normalizeMusicAsset(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return '';
+    }
+    if (trimmed == 'calm_inhale.mp3') {
+      return 'audio/calm_inhale.wav';
+    }
+    if (trimmed == 'calm_exhale.mp3') {
+      return 'audio/calm_exhale.wav';
+    }
+    if (trimmed.startsWith('assets/')) {
+      return trimmed.substring(7);
+    }
+    if (trimmed.contains('/')) {
+      return trimmed;
+    }
+    return 'audio/$trimmed';
   }
 
   Future<void> _saveData() async {
@@ -200,13 +249,36 @@ class _HomePageState extends State<HomePage> {
   }
 
   String _phaseMusic(BreathPhase phase) {
+    final music = _phaseMusicAsset(phase);
+    if (music == null || music.isEmpty) {
+      return phase == BreathPhase.pause ? '-' : '未设置';
+    }
+    return music;
+  }
+
+  String? _phaseMusicAsset(BreathPhase phase) {
     switch (phase) {
       case BreathPhase.inhale:
-        return _activePreset.inhaleMusic.isEmpty ? '未设置' : _activePreset.inhaleMusic;
+        final music = _normalizeMusicAsset(_activePreset.inhaleMusic);
+        return music.isEmpty ? null : music;
       case BreathPhase.exhale:
-        return _activePreset.exhaleMusic.isEmpty ? '未设置' : _activePreset.exhaleMusic;
+        final music = _normalizeMusicAsset(_activePreset.exhaleMusic);
+        return music.isEmpty ? null : music;
       case BreathPhase.pause:
-        return '-';
+        return null;
+    }
+  }
+
+  Future<void> _playPhaseMusic(BreathPhase phase) async {
+    final assetPath = _phaseMusicAsset(phase);
+    if (assetPath == null) {
+      return;
+    }
+    try {
+      await _audioPlayer.stop();
+      await _audioPlayer.play(AssetSource(assetPath));
+    } catch (e) {
+      debugPrint('Failed to play asset "$assetPath": $e');
     }
   }
 
@@ -220,6 +292,7 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _isRunning = true;
     });
+    unawaited(_playPhaseMusic(_phase));
 
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) {
@@ -266,9 +339,13 @@ class _HomePageState extends State<HomePage> {
         _phase = BreathPhase.inhale;
     }
     _remainingSeconds = _phaseDuration(_phase);
+    if (_isRunning) {
+      unawaited(_playPhaseMusic(_phase));
+    }
   }
 
-  Future<void> _openPresetEditor({BreathingPreset? existing, int? index}) async {
+  Future<void> _openPresetEditor(
+      {BreathingPreset? existing, int? index}) async {
     final formKey = GlobalKey<FormState>();
     final nameCtrl = TextEditingController(text: existing?.name ?? '');
     final inhaleCtrl = TextEditingController(
@@ -280,8 +357,12 @@ class _HomePageState extends State<HomePage> {
     final pauseCtrl = TextEditingController(
       text: (existing?.pauseSeconds ?? 2).toString(),
     );
-    final inhaleMusicCtrl = TextEditingController(text: existing?.inhaleMusic ?? '');
-    final exhaleMusicCtrl = TextEditingController(text: existing?.exhaleMusic ?? '');
+    final inhaleMusicCtrl = TextEditingController(
+      text: _normalizeMusicAsset(existing?.inhaleMusic ?? ''),
+    );
+    final exhaleMusicCtrl = TextEditingController(
+      text: _normalizeMusicAsset(existing?.exhaleMusic ?? ''),
+    );
 
     final result = await showDialog<BreathingPreset>(
       context: context,
@@ -325,13 +406,15 @@ class _HomePageState extends State<HomePage> {
                   TextFormField(
                     controller: inhaleMusicCtrl,
                     decoration: const InputDecoration(
-                      labelText: '吸气音乐（名称/路径）',
+                      labelText: '吸气音乐（资源路径）',
+                      hintText: '例如: audio/calm_inhale.wav',
                     ),
                   ),
                   TextFormField(
                     controller: exhaleMusicCtrl,
                     decoration: const InputDecoration(
-                      labelText: '呼气音乐（名称/路径）',
+                      labelText: '呼气音乐（资源路径）',
+                      hintText: '例如: audio/calm_exhale.wav',
                     ),
                   ),
                 ],
@@ -350,14 +433,14 @@ class _HomePageState extends State<HomePage> {
                 }
                 Navigator.pop(
                   context,
-                  BreathingPreset(
+                  _normalizePresetMusic(BreathingPreset(
                     name: nameCtrl.text.trim(),
                     inhaleSeconds: int.parse(inhaleCtrl.text.trim()),
                     exhaleSeconds: int.parse(exhaleCtrl.text.trim()),
                     pauseSeconds: int.parse(pauseCtrl.text.trim()),
                     inhaleMusic: inhaleMusicCtrl.text.trim(),
                     exhaleMusic: exhaleMusicCtrl.text.trim(),
-                  ),
+                  )),
                 );
               },
               child: const Text('保存'),
@@ -437,7 +520,7 @@ class _HomePageState extends State<HomePage> {
     return ListView.separated(
       padding: const EdgeInsets.all(16),
       itemCount: _presets.length + 1,
-      separatorBuilder: (_, _) => const SizedBox(height: 12),
+      separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
         if (index == _presets.length) {
           return OutlinedButton.icon(
@@ -451,9 +534,8 @@ class _HomePageState extends State<HomePage> {
         final selected = index == _selectedIndex;
 
         return Card(
-          color: selected
-              ? Theme.of(context).colorScheme.primaryContainer
-              : null,
+          color:
+              selected ? Theme.of(context).colorScheme.primaryContainer : null,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -472,9 +554,12 @@ class _HomePageState extends State<HomePage> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                Text('吸气 ${preset.inhaleSeconds}s · 呼气 ${preset.exhaleSeconds}s · 暂停 ${preset.pauseSeconds}s'),
-                Text('吸气音乐: ${preset.inhaleMusic.isEmpty ? '未设置' : preset.inhaleMusic}'),
-                Text('呼气音乐: ${preset.exhaleMusic.isEmpty ? '未设置' : preset.exhaleMusic}'),
+                Text(
+                    '吸气 ${preset.inhaleSeconds}s · 呼气 ${preset.exhaleSeconds}s · 暂停 ${preset.pauseSeconds}s'),
+                Text(
+                    '吸气音乐: ${preset.inhaleMusic.isEmpty ? '未设置' : preset.inhaleMusic}'),
+                Text(
+                    '呼气音乐: ${preset.exhaleMusic.isEmpty ? '未设置' : preset.exhaleMusic}'),
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,
