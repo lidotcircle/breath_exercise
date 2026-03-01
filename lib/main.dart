@@ -462,6 +462,7 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     unawaited(_backgroundAudioPlayer.setReleaseMode(ReleaseMode.loop));
+    unawaited(_configureAudioMixingContext());
     _loadData();
   }
 
@@ -542,6 +543,18 @@ class _HomePageState extends State<HomePage> {
     _resetSession();
     if (shouldSave) {
       await _saveData();
+    }
+  }
+
+  Future<void> _configureAudioMixingContext() async {
+    final context = AudioContextConfig(
+      focus: AudioContextConfigFocus.mixWithOthers,
+    ).build();
+    try {
+      await _audioPlayer.setAudioContext(context);
+      await _backgroundAudioPlayer.setAudioContext(context);
+    } catch (e) {
+      debugPrint('Failed to configure audio mixing context: $e');
     }
   }
 
@@ -764,71 +777,8 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  bool get _useSingleChannelOnThisPlatform {
-    return !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
-  }
-
-  Future<void> _playSourceOnPlayer({
-    required AudioPlayer player,
-    required String source,
-    required ReleaseMode releaseMode,
-    required double volume,
-  }) async {
-    await player.stop();
-    await player.setReleaseMode(releaseMode);
-    await player.setVolume(volume);
-    if (_isFileMusic(source)) {
-      final filePath = _decodeFileUri(source);
-      await player.play(DeviceFileSource(filePath));
-    } else {
-      await player.play(AssetSource(source));
-    }
-    await player.setVolume(volume);
-  }
-
-  Future<void> _playSingleChannelForCurrentPhase() async {
-    if (!_isRunning) {
-      return;
-    }
-    final phaseSource = _phaseMusicAsset(_phase);
-    try {
-      if (phaseSource != null && phaseSource.isNotEmpty) {
-        await _playSourceOnPlayer(
-          player: _audioPlayer,
-          source: phaseSource,
-          releaseMode: _phaseShouldRepeat(_phase)
-              ? ReleaseMode.loop
-              : ReleaseMode.release,
-          volume: _phaseVolume(_phase),
-        );
-        return;
-      }
-
-      if (_backgroundMusicEnabled && _backgroundMusicSource.isNotEmpty) {
-        final bg = _normalizeMusicAsset(_backgroundMusicSource);
-        if (bg.isNotEmpty) {
-          await _playSourceOnPlayer(
-            player: _audioPlayer,
-            source: bg,
-            releaseMode: ReleaseMode.loop,
-            volume: _backgroundMusicVolume,
-          );
-          return;
-        }
-      }
-
-      await _audioPlayer.stop();
-    } catch (e) {
-      debugPrint('Failed single-channel playback switch: $e');
-    }
-  }
-
   Future<void> _startBackgroundMusic() async {
     if (!_backgroundMusicEnabled) {
-      return;
-    }
-    if (_useSingleChannelOnThisPlatform) {
-      await _playSingleChannelForCurrentPhase();
       return;
     }
     final source = _normalizeMusicAsset(_backgroundMusicSource);
@@ -860,9 +810,6 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _syncBackgroundMusicLevel(BreathPhase phase) async {
-    if (_useSingleChannelOnThisPlatform) {
-      return;
-    }
     if (!_backgroundMusicEnabled || !_isRunning) {
       return;
     }
@@ -1011,12 +958,8 @@ class _HomePageState extends State<HomePage> {
         _autoPauseRemainingSeconds = _autoPauseDurationSeconds;
       }
     });
-    if (_useSingleChannelOnThisPlatform) {
-      unawaited(_playSingleChannelForCurrentPhase());
-    } else {
-      unawaited(_startBackgroundMusic());
-      unawaited(_playPhaseMusic(_phase));
-    }
+    unawaited(_startBackgroundMusic());
+    unawaited(_playPhaseMusic(_phase));
 
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) {
@@ -1079,11 +1022,7 @@ class _HomePageState extends State<HomePage> {
     }
     _remainingSeconds = _phaseDuration(_phase);
     if (_isRunning) {
-      if (_useSingleChannelOnThisPlatform) {
-        unawaited(_playSingleChannelForCurrentPhase());
-      } else {
-        unawaited(_playPhaseMusic(_phase));
-      }
+      unawaited(_playPhaseMusic(_phase));
     }
   }
 
@@ -1491,10 +1430,6 @@ class _HomePageState extends State<HomePage> {
     if (!_isRunning) {
       return;
     }
-    if (_useSingleChannelOnThisPlatform) {
-      await _playSingleChannelForCurrentPhase();
-      return;
-    }
     if (_backgroundMusicEnabled && _backgroundMusicSource.isNotEmpty) {
       await _startBackgroundMusic();
       await _syncBackgroundMusicLevel(_phase);
@@ -1511,10 +1446,6 @@ class _HomePageState extends State<HomePage> {
     if (!_isRunning) {
       return;
     }
-    if (_useSingleChannelOnThisPlatform) {
-      await _playSingleChannelForCurrentPhase();
-      return;
-    }
     if (_backgroundMusicEnabled && _backgroundMusicSource.isNotEmpty) {
       await _startBackgroundMusic();
       await _syncBackgroundMusicLevel(_phase);
@@ -1529,10 +1460,6 @@ class _HomePageState extends State<HomePage> {
     });
     await _saveData();
     if (!_isRunning || !_backgroundMusicEnabled) {
-      return;
-    }
-    if (_useSingleChannelOnThisPlatform) {
-      await _playSingleChannelForCurrentPhase();
       return;
     }
     await _syncBackgroundMusicLevel(_phase);
