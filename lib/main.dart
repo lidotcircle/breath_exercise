@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -85,6 +87,13 @@ class BreathingPreset {
 
 enum BreathPhase { inhale, exhale, pause }
 
+class _AudioChoice {
+  const _AudioChoice({required this.value, required this.label});
+
+  final String value;
+  final String label;
+}
+
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -95,6 +104,14 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   static const _presetsKey = 'breathing_presets';
   static const _selectedPresetIndexKey = 'selected_preset_index';
+  static const Map<String, String> _builtInAudioLabels = {
+    'audio/calm_inhale.wav': '平静吸气 (内置)',
+    'audio/calm_exhale.wav': '平静呼气 (内置)',
+    'audio/wiki_light_rainfall.ogg': '轻雨声 (内置)',
+    'audio/wiki_meditation_gong.ogg': '冥想钟声 (内置)',
+    'audio/wiki_meditation_vii.ogg': '冥想音乐 VII (内置)',
+    'audio/wiki_meditation_louise_jones.ogg': '冥想音乐 Louise Jones (内置)',
+  };
 
   final List<BreathingPreset> _presets = [];
 
@@ -202,6 +219,12 @@ class _HomePageState extends State<HomePage> {
     if (trimmed.isEmpty) {
       return '';
     }
+    if (trimmed.startsWith('file://') || trimmed.contains('://')) {
+      return trimmed;
+    }
+    if (trimmed.startsWith('/')) {
+      return Uri.file(trimmed).toString();
+    }
     if (trimmed == 'calm_inhale.mp3') {
       return 'audio/calm_inhale.wav';
     }
@@ -210,6 +233,9 @@ class _HomePageState extends State<HomePage> {
     }
     if (trimmed.startsWith('assets/')) {
       return trimmed.substring(7);
+    }
+    if (trimmed.startsWith('audio/')) {
+      return trimmed;
     }
     if (trimmed.contains('/')) {
       return trimmed;
@@ -253,7 +279,7 @@ class _HomePageState extends State<HomePage> {
     if (music == null || music.isEmpty) {
       return phase == BreathPhase.pause ? '-' : '未设置';
     }
-    return music;
+    return _audioLabel(music);
   }
 
   String? _phaseMusicAsset(BreathPhase phase) {
@@ -276,10 +302,107 @@ class _HomePageState extends State<HomePage> {
     }
     try {
       await _audioPlayer.stop();
-      await _audioPlayer.play(AssetSource(assetPath));
+      if (_isFileMusic(assetPath)) {
+        final filePath = _decodeFileUri(assetPath);
+        await _audioPlayer.play(DeviceFileSource(filePath));
+      } else {
+        await _audioPlayer.play(AssetSource(assetPath));
+      }
     } catch (e) {
-      debugPrint('Failed to play asset "$assetPath": $e');
+      debugPrint('Failed to play "$assetPath": $e');
     }
+  }
+
+  bool _isFileMusic(String source) {
+    return source.startsWith('file://');
+  }
+
+  String _decodeFileUri(String fileUri) {
+    final parsed = Uri.tryParse(fileUri);
+    if (parsed == null) {
+      return fileUri;
+    }
+    return Uri.decodeComponent(parsed.path);
+  }
+
+  String _audioLabel(String source) {
+    final normalized = _normalizeMusicAsset(source);
+    final builtIn = _builtInAudioLabels[normalized];
+    if (builtIn != null) {
+      return builtIn;
+    }
+    if (_isFileMusic(normalized)) {
+      return '本地文件: ${_extractFileName(normalized)}';
+    }
+    return normalized;
+  }
+
+  String _extractFileName(String fileUri) {
+    final path = Uri.tryParse(fileUri)?.path ?? fileUri;
+    final segments = path.split(RegExp(r'[\\/]'));
+    if (segments.isEmpty) {
+      return path;
+    }
+    return Uri.decodeComponent(segments.last);
+  }
+
+  List<_AudioChoice> _audioChoices(String selectedValue) {
+    final available = <String, String>{..._builtInAudioLabels};
+
+    for (final preset in _presets) {
+      final inhale = _normalizeMusicAsset(preset.inhaleMusic);
+      final exhale = _normalizeMusicAsset(preset.exhaleMusic);
+      if (inhale.isNotEmpty) {
+        available[inhale] = _audioLabel(inhale);
+      }
+      if (exhale.isNotEmpty) {
+        available[exhale] = _audioLabel(exhale);
+      }
+    }
+
+    final normalizedSelected = _normalizeMusicAsset(selectedValue);
+    if (normalizedSelected.isNotEmpty) {
+      available[normalizedSelected] = _audioLabel(normalizedSelected);
+    }
+
+    return available.entries
+        .map((entry) => _AudioChoice(value: entry.key, label: entry.value))
+        .toList();
+  }
+
+  String _safeDropdownValue(String currentValue, List<_AudioChoice> choices) {
+    final normalized = _normalizeMusicAsset(currentValue);
+    if (normalized.isEmpty) {
+      return '';
+    }
+    for (final choice in choices) {
+      if (choice.value == normalized) {
+        return normalized;
+      }
+    }
+    return '';
+  }
+
+  Future<String?> _pickAudioFile() async {
+    if (kIsWeb) {
+      if (!mounted) {
+        return null;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Web 端暂不支持导入本地文件')),
+      );
+      return null;
+    }
+
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac'],
+    );
+    final filePath = result?.files.single.path;
+    if (filePath == null || filePath.isEmpty) {
+      return null;
+    }
+    return Uri.file(filePath).toString();
   }
 
   void _startSession() {
@@ -357,107 +480,190 @@ class _HomePageState extends State<HomePage> {
     final pauseCtrl = TextEditingController(
       text: (existing?.pauseSeconds ?? 2).toString(),
     );
-    final inhaleMusicCtrl = TextEditingController(
-      text: _normalizeMusicAsset(existing?.inhaleMusic ?? ''),
-    );
-    final exhaleMusicCtrl = TextEditingController(
-      text: _normalizeMusicAsset(existing?.exhaleMusic ?? ''),
-    );
+    var inhaleMusicValue = _normalizeMusicAsset(existing?.inhaleMusic ?? '');
+    var exhaleMusicValue = _normalizeMusicAsset(existing?.exhaleMusic ?? '');
 
     final result = await showDialog<BreathingPreset>(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: Text(existing == null ? '新建预设' : '编辑预设'),
-          content: SingleChildScrollView(
-            child: Form(
-              key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextFormField(
-                    controller: nameCtrl,
-                    decoration: const InputDecoration(labelText: '预设名称'),
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return '请输入预设名称';
-                      }
-                      return null;
-                    },
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final inhaleChoices = _audioChoices(inhaleMusicValue);
+            final exhaleChoices = _audioChoices(exhaleMusicValue);
+            final inhaleDropdownValue = _safeDropdownValue(
+              inhaleMusicValue,
+              inhaleChoices,
+            );
+            final exhaleDropdownValue = _safeDropdownValue(
+              exhaleMusicValue,
+              exhaleChoices,
+            );
+
+            return AlertDialog(
+              title: Text(existing == null ? '新建预设' : '编辑预设'),
+              content: SingleChildScrollView(
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextFormField(
+                        controller: nameCtrl,
+                        decoration: const InputDecoration(labelText: '预设名称'),
+                        validator: (value) {
+                          if (value == null || value.trim().isEmpty) {
+                            return '请输入预设名称';
+                          }
+                          return null;
+                        },
+                      ),
+                      TextFormField(
+                        controller: inhaleCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: '吸气秒数'),
+                        validator: _validatePositiveSeconds,
+                      ),
+                      TextFormField(
+                        controller: exhaleCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: '呼气秒数'),
+                        validator: _validatePositiveSeconds,
+                      ),
+                      TextFormField(
+                        controller: pauseCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(labelText: '暂停秒数'),
+                        validator: _validatePositiveSeconds,
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        value: inhaleDropdownValue,
+                        decoration: const InputDecoration(labelText: '吸气音乐'),
+                        items: [
+                          const DropdownMenuItem(
+                            value: '',
+                            child: Text('不播放音乐'),
+                          ),
+                          ...inhaleChoices.map(
+                            (choice) => DropdownMenuItem(
+                              value: choice.value,
+                              child: Text(choice.label),
+                            ),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          setDialogState(() {
+                            inhaleMusicValue = value ?? '';
+                          });
+                        },
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final imported = await _pickAudioFile();
+                            if (imported == null || !context.mounted) {
+                              return;
+                            }
+                            setDialogState(() {
+                              inhaleMusicValue = imported;
+                            });
+                          },
+                          icon: const Icon(Icons.upload_file),
+                          label: const Text('导入本地音频'),
+                        ),
+                      ),
+                      DropdownButtonFormField<String>(
+                        value: exhaleDropdownValue,
+                        decoration: const InputDecoration(labelText: '呼气音乐'),
+                        items: [
+                          const DropdownMenuItem(
+                            value: '',
+                            child: Text('不播放音乐'),
+                          ),
+                          ...exhaleChoices.map(
+                            (choice) => DropdownMenuItem(
+                              value: choice.value,
+                              child: Text(choice.label),
+                            ),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          setDialogState(() {
+                            exhaleMusicValue = value ?? '';
+                          });
+                        },
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final imported = await _pickAudioFile();
+                            if (imported == null || !context.mounted) {
+                              return;
+                            }
+                            setDialogState(() {
+                              exhaleMusicValue = imported;
+                            });
+                          },
+                          icon: const Icon(Icons.upload_file),
+                          label: const Text('导入本地音频'),
+                        ),
+                      ),
+                    ],
                   ),
-                  TextFormField(
-                    controller: inhaleCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: '吸气秒数'),
-                    validator: _validatePositiveSeconds,
-                  ),
-                  TextFormField(
-                    controller: exhaleCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: '呼气秒数'),
-                    validator: _validatePositiveSeconds,
-                  ),
-                  TextFormField(
-                    controller: pauseCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: '暂停秒数'),
-                    validator: _validatePositiveSeconds,
-                  ),
-                  TextFormField(
-                    controller: inhaleMusicCtrl,
-                    decoration: const InputDecoration(
-                      labelText: '吸气音乐（资源路径）',
-                      hintText: '例如: audio/calm_inhale.wav',
-                    ),
-                  ),
-                  TextFormField(
-                    controller: exhaleMusicCtrl,
-                    decoration: const InputDecoration(
-                      labelText: '呼气音乐（资源路径）',
-                      hintText: '例如: audio/calm_exhale.wav',
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () {
-                if (!formKey.currentState!.validate()) {
-                  return;
-                }
-                Navigator.pop(
-                  context,
-                  _normalizePresetMusic(BreathingPreset(
-                    name: nameCtrl.text.trim(),
-                    inhaleSeconds: int.parse(inhaleCtrl.text.trim()),
-                    exhaleSeconds: int.parse(exhaleCtrl.text.trim()),
-                    pauseSeconds: int.parse(pauseCtrl.text.trim()),
-                    inhaleMusic: inhaleMusicCtrl.text.trim(),
-                    exhaleMusic: exhaleMusicCtrl.text.trim(),
-                  )),
-                );
-              },
-              child: const Text('保存'),
-            ),
-          ],
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    FocusManager.instance.primaryFocus?.unfocus();
+                    Navigator.pop(context);
+                  },
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    if (!formKey.currentState!.validate()) {
+                      return;
+                    }
+                    FocusManager.instance.primaryFocus?.unfocus();
+                    final preset = _normalizePresetMusic(
+                      BreathingPreset(
+                        name: nameCtrl.text.trim(),
+                        inhaleSeconds: int.parse(inhaleCtrl.text.trim()),
+                        exhaleSeconds: int.parse(exhaleCtrl.text.trim()),
+                        pauseSeconds: int.parse(pauseCtrl.text.trim()),
+                        inhaleMusic: inhaleMusicValue,
+                        exhaleMusic: exhaleMusicValue,
+                      ),
+                    );
+                    Navigator.pop(
+                      context,
+                      preset,
+                    );
+                  },
+                  child: const Text('保存'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
 
+    await WidgetsBinding.instance.endOfFrame;
     nameCtrl.dispose();
     inhaleCtrl.dispose();
     exhaleCtrl.dispose();
     pauseCtrl.dispose();
-    inhaleMusicCtrl.dispose();
-    exhaleMusicCtrl.dispose();
 
     if (result == null) {
+      return;
+    }
+
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) {
       return;
     }
 
@@ -557,9 +763,9 @@ class _HomePageState extends State<HomePage> {
                 Text(
                     '吸气 ${preset.inhaleSeconds}s · 呼气 ${preset.exhaleSeconds}s · 暂停 ${preset.pauseSeconds}s'),
                 Text(
-                    '吸气音乐: ${preset.inhaleMusic.isEmpty ? '未设置' : preset.inhaleMusic}'),
+                    '吸气音乐: ${preset.inhaleMusic.isEmpty ? '未设置' : _audioLabel(preset.inhaleMusic)}'),
                 Text(
-                    '呼气音乐: ${preset.exhaleMusic.isEmpty ? '未设置' : preset.exhaleMusic}'),
+                    '呼气音乐: ${preset.exhaleMusic.isEmpty ? '未设置' : _audioLabel(preset.exhaleMusic)}'),
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,
@@ -663,7 +869,7 @@ class _HomePageState extends State<HomePage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('呼吸练习APP'),
+        title: const Text('呼吸练习'),
       ),
       body: IndexedStack(
         index: _tabIndex,
