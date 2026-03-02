@@ -107,7 +107,8 @@ class BreathingPreset {
     required this.name,
     required this.inhaleSeconds,
     required this.exhaleSeconds,
-    required this.pauseSeconds,
+    required this.holdAfterInhaleSeconds,
+    required this.holdAfterExhaleSeconds,
     required this.inhaleMusic,
     required this.exhaleMusic,
     required this.pauseMusic,
@@ -122,7 +123,8 @@ class BreathingPreset {
   final String name;
   final int inhaleSeconds;
   final int exhaleSeconds;
-  final int pauseSeconds;
+  final int holdAfterInhaleSeconds;
+  final int holdAfterExhaleSeconds;
   final String inhaleMusic;
   final String exhaleMusic;
   final String pauseMusic;
@@ -138,7 +140,10 @@ class BreathingPreset {
       'name': name,
       'inhaleSeconds': inhaleSeconds,
       'exhaleSeconds': exhaleSeconds,
-      'pauseSeconds': pauseSeconds,
+      'holdAfterInhaleSeconds': holdAfterInhaleSeconds,
+      'holdAfterExhaleSeconds': holdAfterExhaleSeconds,
+      // Backward compatibility for older app versions.
+      'pauseSeconds': holdAfterInhaleSeconds,
       'inhaleMusic': inhaleMusic,
       'exhaleMusic': exhaleMusic,
       'pauseMusic': pauseMusic,
@@ -156,7 +161,14 @@ class BreathingPreset {
       name: json['name'] as String? ?? 'Unnamed Preset',
       inhaleSeconds: json['inhaleSeconds'] as int? ?? 4,
       exhaleSeconds: json['exhaleSeconds'] as int? ?? 4,
-      pauseSeconds: json['pauseSeconds'] as int? ?? 2,
+      holdAfterInhaleSeconds:
+          json['holdAfterInhaleSeconds'] as int? ??
+              json['pauseSeconds'] as int? ??
+              2,
+      holdAfterExhaleSeconds:
+          json['holdAfterExhaleSeconds'] as int? ??
+              json['pauseSeconds'] as int? ??
+              2,
       inhaleMusic: json['inhaleMusic'] as String? ?? '',
       exhaleMusic: json['exhaleMusic'] as String? ?? '',
       pauseMusic: json['pauseMusic'] as String? ?? '',
@@ -173,7 +185,8 @@ class BreathingPreset {
     String? name,
     int? inhaleSeconds,
     int? exhaleSeconds,
-    int? pauseSeconds,
+    int? holdAfterInhaleSeconds,
+    int? holdAfterExhaleSeconds,
     String? inhaleMusic,
     String? exhaleMusic,
     String? pauseMusic,
@@ -188,7 +201,10 @@ class BreathingPreset {
       name: name ?? this.name,
       inhaleSeconds: inhaleSeconds ?? this.inhaleSeconds,
       exhaleSeconds: exhaleSeconds ?? this.exhaleSeconds,
-      pauseSeconds: pauseSeconds ?? this.pauseSeconds,
+      holdAfterInhaleSeconds:
+          holdAfterInhaleSeconds ?? this.holdAfterInhaleSeconds,
+      holdAfterExhaleSeconds:
+          holdAfterExhaleSeconds ?? this.holdAfterExhaleSeconds,
       inhaleMusic: inhaleMusic ?? this.inhaleMusic,
       exhaleMusic: exhaleMusic ?? this.exhaleMusic,
       pauseMusic: pauseMusic ?? this.pauseMusic,
@@ -329,7 +345,8 @@ class _HomePageState extends State<HomePage> {
       'presetName': '预设名称',
       'inhaleSeconds': '吸气秒数',
       'exhaleSeconds': '呼气秒数',
-      'pauseSeconds': '屏息秒数',
+      'holdAfterInhaleSeconds': '吸气后屏息秒数',
+      'holdAfterExhaleSeconds': '呼气后屏息秒数',
       'inhaleMusic': '吸气音乐',
       'exhaleMusic': '呼气音乐',
       'holdMusic': '屏息音乐',
@@ -386,7 +403,7 @@ class _HomePageState extends State<HomePage> {
       'audioMeditationGong': '冥想钟声',
       'audioMeditationVII': '冥想音乐 VII',
       'audioMeditationLouise': '冥想音乐 Louise Jones',
-      'patternDurations': '吸气 {inhale}s · 屏息 {pause}s · 呼气 {exhale}s · 屏息 {pause}s',
+      'patternDurations': '吸气 {inhale}s · 屏息 {holdIn}s · 呼气 {exhale}s · 屏息 {holdOut}s',
       'patternInhaleMusic': '吸气音乐: {music}',
       'patternExhaleMusic': '呼气音乐: {music}',
       'patternHoldMusic': '屏息音乐: {music}',
@@ -413,7 +430,8 @@ class _HomePageState extends State<HomePage> {
       'presetName': 'Preset Name',
       'inhaleSeconds': 'Inhale Seconds',
       'exhaleSeconds': 'Exhale Seconds',
-      'pauseSeconds': 'Hold Seconds',
+      'holdAfterInhaleSeconds': 'Hold After Inhale (s)',
+      'holdAfterExhaleSeconds': 'Hold After Exhale (s)',
       'inhaleMusic': 'Inhale Audio',
       'exhaleMusic': 'Exhale Audio',
       'holdMusic': 'Hold Audio',
@@ -470,7 +488,7 @@ class _HomePageState extends State<HomePage> {
       'audioMeditationGong': 'Meditation Gong',
       'audioMeditationVII': 'Meditation VII',
       'audioMeditationLouise': 'Meditation Louise Jones',
-      'patternDurations': 'Inhale {inhale}s · Hold {pause}s · Exhale {exhale}s · Hold {pause}s',
+      'patternDurations': 'Inhale {inhale}s · Hold {holdIn}s · Exhale {exhale}s · Hold {holdOut}s',
       'patternInhaleMusic': 'Inhale audio: {music}',
       'patternExhaleMusic': 'Exhale audio: {music}',
       'patternHoldMusic': 'Hold audio: {music}',
@@ -504,7 +522,8 @@ class _HomePageState extends State<HomePage> {
     name: 'Default Preset',
     inhaleSeconds: 4,
     exhaleSeconds: 4,
-    pauseSeconds: 2,
+    holdAfterInhaleSeconds: 2,
+    holdAfterExhaleSeconds: 2,
     inhaleMusic: 'audio/transitive/meditation_inhale.wav',
     exhaleMusic: 'audio/transitive/meditation_exhale.wav',
     pauseMusic: '',
@@ -761,11 +780,11 @@ class _HomePageState extends State<HomePage> {
       case BreathPhase.inhale:
         return _activePreset.inhaleSeconds;
       case BreathPhase.holdAfterInhale:
-        return _activePreset.pauseSeconds;
+        return _activePreset.holdAfterInhaleSeconds;
       case BreathPhase.exhale:
         return _activePreset.exhaleSeconds;
       case BreathPhase.holdAfterExhale:
-        return _activePreset.pauseSeconds;
+        return _activePreset.holdAfterExhaleSeconds;
     }
   }
 
@@ -837,7 +856,6 @@ class _HomePageState extends State<HomePage> {
     final assetPath = _phaseMusicAsset(phase);
     final targetVolume = _phaseVolume(phase);
     try {
-      await _syncBackgroundMusicLevel(phase);
       await _audioPlayer.stop();
       if (assetPath == null) {
         await _audioPlayer.setReleaseMode(ReleaseMode.release);
@@ -878,7 +896,7 @@ class _HomePageState extends State<HomePage> {
         await _backgroundAudioPlayer.play(AssetSource(source));
       }
       if (_isRunning) {
-        await _syncBackgroundMusicLevel(_phase);
+        await _syncBackgroundMusicLevel();
       }
     } catch (e) {
       debugPrint('Failed to play background music "$source": $e');
@@ -899,16 +917,12 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _syncBackgroundMusicLevel(BreathPhase phase) async {
+  Future<void> _syncBackgroundMusicLevel() async {
     if (!_backgroundMusicEnabled || !_isRunning) {
       return;
     }
-    final phaseHasAudio = (_phaseMusicAsset(phase) ?? '').isNotEmpty;
-    final target = phaseHasAudio
-        ? (_backgroundMusicVolume * 0.35).clamp(0.0, 1.0).toDouble()
-        : _backgroundMusicVolume;
     try {
-      await _backgroundAudioPlayer.setVolume(target);
+      await _backgroundAudioPlayer.setVolume(_backgroundMusicVolume);
     } catch (e) {
       debugPrint('Failed to set background volume: $e');
     }
@@ -1127,8 +1141,11 @@ class _HomePageState extends State<HomePage> {
     final exhaleCtrl = TextEditingController(
       text: (existing?.exhaleSeconds ?? 4).toString(),
     );
-    final pauseCtrl = TextEditingController(
-      text: (existing?.pauseSeconds ?? 2).toString(),
+    final holdAfterInhaleCtrl = TextEditingController(
+      text: (existing?.holdAfterInhaleSeconds ?? 2).toString(),
+    );
+    final holdAfterExhaleCtrl = TextEditingController(
+      text: (existing?.holdAfterExhaleSeconds ?? 2).toString(),
     );
     var inhaleMusicValue = _normalizeMusicAsset(existing?.inhaleMusic ?? '');
     var exhaleMusicValue = _normalizeMusicAsset(existing?.exhaleMusic ?? '');
@@ -1199,10 +1216,17 @@ class _HomePageState extends State<HomePage> {
                         validator: _validatePositiveSeconds,
                       ),
                       TextFormField(
-                        controller: pauseCtrl,
+                        controller: holdAfterInhaleCtrl,
                         keyboardType: TextInputType.number,
                         decoration:
-                            InputDecoration(labelText: t('pauseSeconds')),
+                            InputDecoration(labelText: t('holdAfterInhaleSeconds')),
+                        validator: _validatePositiveSeconds,
+                      ),
+                      TextFormField(
+                        controller: holdAfterExhaleCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration:
+                            InputDecoration(labelText: t('holdAfterExhaleSeconds')),
                         validator: _validatePositiveSeconds,
                       ),
                       const SizedBox(height: 8),
@@ -1407,7 +1431,12 @@ class _HomePageState extends State<HomePage> {
                         name: nameCtrl.text.trim(),
                         inhaleSeconds: int.parse(inhaleCtrl.text.trim()),
                         exhaleSeconds: int.parse(exhaleCtrl.text.trim()),
-                        pauseSeconds: int.parse(pauseCtrl.text.trim()),
+                        holdAfterInhaleSeconds: int.parse(
+                          holdAfterInhaleCtrl.text.trim(),
+                        ),
+                        holdAfterExhaleSeconds: int.parse(
+                          holdAfterExhaleCtrl.text.trim(),
+                        ),
                         inhaleMusic: inhaleMusicValue,
                         exhaleMusic: exhaleMusicValue,
                         pauseMusic: holdMusicValue,
@@ -1437,7 +1466,8 @@ class _HomePageState extends State<HomePage> {
     nameCtrl.dispose();
     inhaleCtrl.dispose();
     exhaleCtrl.dispose();
-    pauseCtrl.dispose();
+    holdAfterInhaleCtrl.dispose();
+    holdAfterExhaleCtrl.dispose();
 
     if (result == null) {
       return;
@@ -1539,7 +1569,7 @@ class _HomePageState extends State<HomePage> {
     }
     if (_backgroundMusicEnabled && _backgroundMusicSource.isNotEmpty) {
       await _startBackgroundMusic();
-      await _syncBackgroundMusicLevel(_phase);
+      await _syncBackgroundMusicLevel();
     } else {
       await _backgroundAudioPlayer.stop();
     }
@@ -1555,7 +1585,7 @@ class _HomePageState extends State<HomePage> {
     }
     if (_backgroundMusicEnabled && _backgroundMusicSource.isNotEmpty) {
       await _startBackgroundMusic();
-      await _syncBackgroundMusicLevel(_phase);
+      await _syncBackgroundMusicLevel();
     } else {
       await _backgroundAudioPlayer.stop();
     }
@@ -1569,7 +1599,7 @@ class _HomePageState extends State<HomePage> {
     if (!_isRunning || !_backgroundMusicEnabled) {
       return;
     }
-    await _syncBackgroundMusicLevel(_phase);
+    await _syncBackgroundMusicLevel();
   }
 
   Future<void> _setAutoPauseDurationSeconds(int? seconds) async {
@@ -1728,8 +1758,9 @@ class _HomePageState extends State<HomePage> {
                 Text(
                   tf('patternDurations', {
                     'inhale': '${preset.inhaleSeconds}',
+                    'holdIn': '${preset.holdAfterInhaleSeconds}',
                     'exhale': '${preset.exhaleSeconds}',
-                    'pause': '${preset.pauseSeconds}',
+                    'holdOut': '${preset.holdAfterExhaleSeconds}',
                   }),
                 ),
                 Text(
