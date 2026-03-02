@@ -442,6 +442,7 @@ class _HomePageState extends State<HomePage> {
   BreathPhase _phase = BreathPhase.inhale;
   int _remainingSeconds = 0;
   Timer? _timer;
+  late final PageController _pageController;
   final List<String> _builtInAudioPaths = [..._fallbackBuiltInAudioPaths];
 
   static const BreathingPreset _defaultPreset = BreathingPreset(
@@ -465,6 +466,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _pageController = PageController(initialPage: _tabIndex);
     unawaited(_backgroundAudioPlayer.setReleaseMode(ReleaseMode.loop));
     unawaited(_configureAudioMixingContext());
     _loadData();
@@ -473,6 +475,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _timer?.cancel();
+    _pageController.dispose();
     _audioPlayer.dispose();
     _backgroundAudioPlayer.dispose();
     super.dispose();
@@ -1887,8 +1890,13 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: Text(t('appTitle')),
       ),
-      body: IndexedStack(
-        index: _tabIndex,
+      body: PageView(
+        controller: _pageController,
+        onPageChanged: (index) {
+          setState(() {
+            _tabIndex = index;
+          });
+        },
         children: [
           _buildSessionTab(),
           _buildPresetTab(),
@@ -1898,6 +1906,11 @@ class _HomePageState extends State<HomePage> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tabIndex,
         onDestinationSelected: (index) {
+          _pageController.animateToPage(
+            index,
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOut,
+          );
           setState(() {
             _tabIndex = index;
           });
