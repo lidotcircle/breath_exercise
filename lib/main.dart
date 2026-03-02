@@ -209,7 +209,7 @@ class BreathingPreset {
   }
 }
 
-enum BreathPhase { inhale, exhale, pause }
+enum BreathPhase { inhale, holdAfterInhale, exhale, holdAfterExhale }
 enum AppLanguage { system, zh, en }
 enum AppThemeSetting { auto, light, dark }
 enum VisualScheme { ocean, sunset, forest, monochrome }
@@ -329,7 +329,7 @@ class _HomePageState extends State<HomePage> {
       'presetName': '预设名称',
       'inhaleSeconds': '吸气秒数',
       'exhaleSeconds': '呼气秒数',
-      'pauseSeconds': '暂停秒数',
+      'pauseSeconds': '屏息秒数',
       'inhaleMusic': '吸气音乐',
       'exhaleMusic': '呼气音乐',
       'holdMusic': '屏息音乐',
@@ -386,7 +386,7 @@ class _HomePageState extends State<HomePage> {
       'audioMeditationGong': '冥想钟声',
       'audioMeditationVII': '冥想音乐 VII',
       'audioMeditationLouise': '冥想音乐 Louise Jones',
-      'patternDurations': '吸气 {inhale}s · 呼气 {exhale}s · 暂停 {pause}s',
+      'patternDurations': '吸气 {inhale}s · 屏息 {pause}s · 呼气 {exhale}s · 屏息 {pause}s',
       'patternInhaleMusic': '吸气音乐: {music}',
       'patternExhaleMusic': '呼气音乐: {music}',
       'patternHoldMusic': '屏息音乐: {music}',
@@ -413,7 +413,7 @@ class _HomePageState extends State<HomePage> {
       'presetName': 'Preset Name',
       'inhaleSeconds': 'Inhale Seconds',
       'exhaleSeconds': 'Exhale Seconds',
-      'pauseSeconds': 'Pause Seconds',
+      'pauseSeconds': 'Hold Seconds',
       'inhaleMusic': 'Inhale Audio',
       'exhaleMusic': 'Exhale Audio',
       'holdMusic': 'Hold Audio',
@@ -470,7 +470,7 @@ class _HomePageState extends State<HomePage> {
       'audioMeditationGong': 'Meditation Gong',
       'audioMeditationVII': 'Meditation VII',
       'audioMeditationLouise': 'Meditation Louise Jones',
-      'patternDurations': 'Inhale {inhale}s · Exhale {exhale}s · Pause {pause}s',
+      'patternDurations': 'Inhale {inhale}s · Hold {pause}s · Exhale {exhale}s · Hold {pause}s',
       'patternInhaleMusic': 'Inhale audio: {music}',
       'patternExhaleMusic': 'Exhale audio: {music}',
       'patternHoldMusic': 'Hold audio: {music}',
@@ -760,9 +760,11 @@ class _HomePageState extends State<HomePage> {
     switch (phase) {
       case BreathPhase.inhale:
         return _activePreset.inhaleSeconds;
+      case BreathPhase.holdAfterInhale:
+        return _activePreset.pauseSeconds;
       case BreathPhase.exhale:
         return _activePreset.exhaleSeconds;
-      case BreathPhase.pause:
+      case BreathPhase.holdAfterExhale:
         return _activePreset.pauseSeconds;
     }
   }
@@ -771,9 +773,11 @@ class _HomePageState extends State<HomePage> {
     switch (phase) {
       case BreathPhase.inhale:
         return t('phaseInhale');
+      case BreathPhase.holdAfterInhale:
+        return t('phasePause');
       case BreathPhase.exhale:
         return t('phaseExhale');
-      case BreathPhase.pause:
+      case BreathPhase.holdAfterExhale:
         return t('phasePause');
     }
   }
@@ -781,7 +785,7 @@ class _HomePageState extends State<HomePage> {
   String _phaseMusic(BreathPhase phase) {
     final music = _phaseMusicAsset(phase);
     if (music == null || music.isEmpty) {
-      return phase == BreathPhase.pause ? '-' : t('notSet');
+      return t('notSet');
     }
     return _audioLabel(music);
   }
@@ -791,10 +795,13 @@ class _HomePageState extends State<HomePage> {
       case BreathPhase.inhale:
         final music = _normalizeMusicAsset(_activePreset.inhaleMusic);
         return music.isEmpty ? null : music;
+      case BreathPhase.holdAfterInhale:
+        final music = _normalizeMusicAsset(_activePreset.pauseMusic);
+        return music.isEmpty ? null : music;
       case BreathPhase.exhale:
         final music = _normalizeMusicAsset(_activePreset.exhaleMusic);
         return music.isEmpty ? null : music;
-      case BreathPhase.pause:
+      case BreathPhase.holdAfterExhale:
         final music = _normalizeMusicAsset(_activePreset.pauseMusic);
         return music.isEmpty ? null : music;
     }
@@ -804,9 +811,11 @@ class _HomePageState extends State<HomePage> {
     switch (phase) {
       case BreathPhase.inhale:
         return _activePreset.repeatInhaleAudio;
+      case BreathPhase.holdAfterInhale:
+        return _activePreset.repeatPauseAudio;
       case BreathPhase.exhale:
         return _activePreset.repeatExhaleAudio;
-      case BreathPhase.pause:
+      case BreathPhase.holdAfterExhale:
         return _activePreset.repeatPauseAudio;
     }
   }
@@ -815,9 +824,11 @@ class _HomePageState extends State<HomePage> {
     switch (phase) {
       case BreathPhase.inhale:
         return _activePreset.inhaleVolume;
+      case BreathPhase.holdAfterInhale:
+        return _activePreset.pauseVolume;
       case BreathPhase.exhale:
         return _activePreset.exhaleVolume;
-      case BreathPhase.pause:
+      case BreathPhase.holdAfterExhale:
         return _activePreset.pauseVolume;
     }
   }
@@ -866,9 +877,17 @@ class _HomePageState extends State<HomePage> {
       } else {
         await _backgroundAudioPlayer.play(AssetSource(source));
       }
+      if (_isRunning) {
+        await _syncBackgroundMusicLevel(_phase);
+      }
     } catch (e) {
       debugPrint('Failed to play background music "$source": $e');
     }
+  }
+
+  Future<void> _startSessionAudio() async {
+    await _startBackgroundMusic();
+    await _playPhaseMusic(_phase);
   }
 
   Future<void> _stopAudio() async {
@@ -1029,8 +1048,7 @@ class _HomePageState extends State<HomePage> {
         _autoPauseRemainingSeconds = _autoPauseDurationSeconds;
       }
     });
-    unawaited(_startBackgroundMusic());
-    unawaited(_playPhaseMusic(_phase));
+    unawaited(_startSessionAudio());
 
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) {
@@ -1085,10 +1103,12 @@ class _HomePageState extends State<HomePage> {
   void _nextPhase() {
     switch (_phase) {
       case BreathPhase.inhale:
-        _phase = BreathPhase.pause;
-      case BreathPhase.pause:
+        _phase = BreathPhase.holdAfterInhale;
+      case BreathPhase.holdAfterInhale:
         _phase = BreathPhase.exhale;
       case BreathPhase.exhale:
+        _phase = BreathPhase.holdAfterExhale;
+      case BreathPhase.holdAfterExhale:
         _phase = BreathPhase.inhale;
     }
     _remainingSeconds = _phaseDuration(_phase);
@@ -1627,9 +1647,11 @@ class _HomePageState extends State<HomePage> {
     switch (_phase) {
       case BreathPhase.inhale:
         return palette.inhale;
+      case BreathPhase.holdAfterInhale:
+        return palette.hold;
       case BreathPhase.exhale:
         return palette.exhale;
-      case BreathPhase.pause:
+      case BreathPhase.holdAfterExhale:
         return palette.hold;
     }
   }
@@ -1647,9 +1669,11 @@ class _HomePageState extends State<HomePage> {
     switch (_phase) {
       case BreathPhase.inhale:
         return 0.45 + (0.35 * p);
+      case BreathPhase.holdAfterInhale:
+        return 0.62;
       case BreathPhase.exhale:
         return 0.8 - (0.35 * p);
-      case BreathPhase.pause:
+      case BreathPhase.holdAfterExhale:
         return 0.62;
     }
   }
