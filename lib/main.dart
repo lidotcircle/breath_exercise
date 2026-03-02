@@ -347,6 +347,7 @@ class _HomePageState extends State<HomePage> {
       'patternRemaining': '剩余: {seconds} 秒',
       'patternPhaseMusic': '阶段音乐: {music}',
       'patternEnterName': '请输入预设名称',
+      'presetNameExists': '预设名称已存在',
     },
     AppLanguage.en: {
       'appTitle': 'Breathing Exercise',
@@ -425,6 +426,7 @@ class _HomePageState extends State<HomePage> {
       'patternRemaining': 'Remaining: {seconds} seconds',
       'patternPhaseMusic': 'Phase audio: {music}',
       'patternEnterName': 'Please enter a preset name',
+      'presetNameExists': 'Preset name already exists',
     },
   };
 
@@ -1103,6 +1105,9 @@ class _HomePageState extends State<HomePage> {
                           if (value == null || value.trim().isEmpty) {
                             return t('patternEnterName');
                           }
+                          if (_isPresetNameDuplicate(value, excludeIndex: index)) {
+                            return t('presetNameExists');
+                          }
                           return null;
                         },
                       ),
@@ -1394,6 +1399,19 @@ class _HomePageState extends State<HomePage> {
       return t('secondsInvalid');
     }
     return null;
+  }
+
+  bool _isPresetNameDuplicate(String candidate, {int? excludeIndex}) {
+    final target = candidate.trim().toLowerCase();
+    for (var i = 0; i < _presets.length; i++) {
+      if (excludeIndex != null && i == excludeIndex) {
+        continue;
+      }
+      if (_presets[i].name.trim().toLowerCase() == target) {
+        return true;
+      }
+    }
+    return false;
   }
 
   Future<void> _deletePreset(int index) async {
