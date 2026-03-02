@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 const _languageKey = 'app_language';
 const _themeSettingKey = 'app_theme_setting';
+const _visualSchemeKey = 'visual_scheme';
 
 void main() {
   runApp(const BreathingApp());
@@ -24,6 +25,7 @@ class BreathingApp extends StatefulWidget {
 
 class _BreathingAppState extends State<BreathingApp> {
   AppThemeSetting _themeSetting = AppThemeSetting.auto;
+  VisualScheme _visualScheme = VisualScheme.ocean;
 
   @override
   void initState() {
@@ -34,11 +36,13 @@ class _BreathingAppState extends State<BreathingApp> {
   Future<void> _loadThemeSetting() async {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString(_themeSettingKey);
+    final visualSaved = prefs.getString(_visualSchemeKey);
     if (!mounted) {
       return;
     }
     setState(() {
       _themeSetting = _parseThemeSetting(saved);
+      _visualScheme = _parseVisualScheme(visualSaved);
     });
   }
 
@@ -48,6 +52,14 @@ class _BreathingAppState extends State<BreathingApp> {
     });
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_themeSettingKey, setting.code);
+  }
+
+  Future<void> _setVisualScheme(VisualScheme scheme) async {
+    setState(() {
+      _visualScheme = scheme;
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_visualSchemeKey, scheme.code);
   }
 
   ThemeMode get _themeMode {
@@ -83,6 +95,8 @@ class _BreathingAppState extends State<BreathingApp> {
       home: HomePage(
         themeSetting: _themeSetting,
         onThemeSettingChanged: _setThemeSetting,
+        visualScheme: _visualScheme,
+        onVisualSchemeChanged: _setVisualScheme,
       ),
     );
   }
@@ -198,6 +212,7 @@ class BreathingPreset {
 enum BreathPhase { inhale, exhale, pause }
 enum AppLanguage { system, zh, en }
 enum AppThemeSetting { auto, light, dark }
+enum VisualScheme { ocean, sunset, forest, monochrome }
 
 extension on AppLanguage {
   String get code {
@@ -234,6 +249,30 @@ AppThemeSetting _parseThemeSetting(String? value) {
   return AppThemeSetting.auto;
 }
 
+extension on VisualScheme {
+  String get code {
+    switch (this) {
+      case VisualScheme.ocean:
+        return 'ocean';
+      case VisualScheme.sunset:
+        return 'sunset';
+      case VisualScheme.forest:
+        return 'forest';
+      case VisualScheme.monochrome:
+        return 'monochrome';
+    }
+  }
+}
+
+VisualScheme _parseVisualScheme(String? value) {
+  for (final scheme in VisualScheme.values) {
+    if (scheme.code == value) {
+      return scheme;
+    }
+  }
+  return VisualScheme.ocean;
+}
+
 class _AudioChoice {
   const _AudioChoice({required this.value, required this.label});
 
@@ -246,10 +285,14 @@ class HomePage extends StatefulWidget {
     super.key,
     required this.themeSetting,
     required this.onThemeSettingChanged,
+    required this.visualScheme,
+    required this.onVisualSchemeChanged,
   });
 
   final AppThemeSetting themeSetting;
   final Future<void> Function(AppThemeSetting setting) onThemeSettingChanged;
+  final VisualScheme visualScheme;
+  final Future<void> Function(VisualScheme scheme) onVisualSchemeChanged;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -276,7 +319,7 @@ class _HomePageState extends State<HomePage> {
       'unnamedPreset': '未命名预设',
       'phaseInhale': '吸气',
       'phaseExhale': '呼气',
-      'phasePause': '暂停',
+      'phasePause': '屏息',
       'notSet': '未设置',
       'keepAtLeastOnePreset': '至少保留一个预设',
       'required': '必填',
@@ -320,6 +363,11 @@ class _HomePageState extends State<HomePage> {
       'themeAuto': '跟随时间（默认）',
       'themeLight': '浅色',
       'themeDark': '深色',
+      'colorScheme': '呼吸动画配色',
+      'schemeOcean': '海洋',
+      'schemeSunset': '落日',
+      'schemeForest': '森林',
+      'schemeMonochrome': '单色',
       'backgroundMusic': '背景音乐',
       'enableBackgroundMusic': '启用背景音乐',
       'backgroundMusicSource': '背景音乐源',
@@ -355,7 +403,7 @@ class _HomePageState extends State<HomePage> {
       'unnamedPreset': 'Unnamed Preset',
       'phaseInhale': 'Inhale',
       'phaseExhale': 'Exhale',
-      'phasePause': 'Pause',
+      'phasePause': 'Hold',
       'notSet': 'Not set',
       'keepAtLeastOnePreset': 'Keep at least one preset',
       'required': 'Required',
@@ -399,6 +447,11 @@ class _HomePageState extends State<HomePage> {
       'themeAuto': 'Auto by time (Default)',
       'themeLight': 'Light',
       'themeDark': 'Dark',
+      'colorScheme': 'Breathing Colors',
+      'schemeOcean': 'Ocean',
+      'schemeSunset': 'Sunset',
+      'schemeForest': 'Forest',
+      'schemeMonochrome': 'Monochrome',
       'backgroundMusic': 'Background Music',
       'enableBackgroundMusic': 'Enable background music',
       'backgroundMusicSource': 'Background music source',
@@ -1032,10 +1085,10 @@ class _HomePageState extends State<HomePage> {
   void _nextPhase() {
     switch (_phase) {
       case BreathPhase.inhale:
-        _phase = BreathPhase.exhale;
-      case BreathPhase.exhale:
         _phase = BreathPhase.pause;
       case BreathPhase.pause:
+        _phase = BreathPhase.exhale;
+      case BreathPhase.exhale:
         _phase = BreathPhase.inhale;
     }
     _remainingSeconds = _phaseDuration(_phase);
@@ -1518,6 +1571,89 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  String _visualSchemeLabel(VisualScheme scheme) {
+    switch (scheme) {
+      case VisualScheme.ocean:
+        return t('schemeOcean');
+      case VisualScheme.sunset:
+        return t('schemeSunset');
+      case VisualScheme.forest:
+        return t('schemeForest');
+      case VisualScheme.monochrome:
+        return t('schemeMonochrome');
+    }
+  }
+
+  ({Color outer, Color donut, Color inhale, Color exhale, Color hold})
+      _visualPalette() {
+    switch (widget.visualScheme) {
+      case VisualScheme.ocean:
+        return (
+          outer: const Color(0xFF80CBC4),
+          donut: const Color(0xFF4DB6AC),
+          inhale: const Color(0xFF26A69A),
+          exhale: const Color(0xFF00897B),
+          hold: const Color(0xFF4FC3F7),
+        );
+      case VisualScheme.sunset:
+        return (
+          outer: const Color(0xFFFFCC80),
+          donut: const Color(0xFFFFB74D),
+          inhale: const Color(0xFFFF8A65),
+          exhale: const Color(0xFFF4511E),
+          hold: const Color(0xFFE57373),
+        );
+      case VisualScheme.forest:
+        return (
+          outer: const Color(0xFFA5D6A7),
+          donut: const Color(0xFF81C784),
+          inhale: const Color(0xFF66BB6A),
+          exhale: const Color(0xFF2E7D32),
+          hold: const Color(0xFF9CCC65),
+        );
+      case VisualScheme.monochrome:
+        return (
+          outer: const Color(0xFFB0BEC5),
+          donut: const Color(0xFF90A4AE),
+          inhale: const Color(0xFF78909C),
+          exhale: const Color(0xFF546E7A),
+          hold: const Color(0xFF607D8B),
+        );
+    }
+  }
+
+  Color _phaseVisualColor() {
+    final palette = _visualPalette();
+    switch (_phase) {
+      case BreathPhase.inhale:
+        return palette.inhale;
+      case BreathPhase.exhale:
+        return palette.exhale;
+      case BreathPhase.pause:
+        return palette.hold;
+    }
+  }
+
+  double _phaseProgress() {
+    final duration = _phaseDuration(_phase);
+    if (duration <= 0) {
+      return 0;
+    }
+    return (1 - (_remainingSeconds / duration)).clamp(0.0, 1.0);
+  }
+
+  double _innerCircleScale() {
+    final p = _phaseProgress();
+    switch (_phase) {
+      case BreathPhase.inhale:
+        return 0.45 + (0.35 * p);
+      case BreathPhase.exhale:
+        return 0.8 - (0.35 * p);
+      case BreathPhase.pause:
+        return 0.62;
+    }
+  }
+
   String _formatDurationMmSs(int seconds) {
     final clamped = seconds.clamp(0, 3600 * 24).toInt();
     final minutes = clamped ~/ 60;
@@ -1623,6 +1759,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildSessionTab() {
+    final palette = _visualPalette();
+    final innerColor = _phaseVisualColor();
+    final innerScale = _innerCircleScale();
+
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -1699,9 +1839,78 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(height: 24),
           Expanded(
             child: Center(
-              child: Text(
-                _phaseLabel(_phase),
-                style: Theme.of(context).textTheme.displayMedium,
+              child: SizedBox(
+                width: 280,
+                height: 280,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Container(
+                      width: 256,
+                      height: 256,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: palette.outer.withOpacity(0.55),
+                          width: 5,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      width: 210,
+                      height: 210,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: palette.donut.withOpacity(0.65),
+                          width: 18,
+                        ),
+                      ),
+                    ),
+                    TweenAnimationBuilder<double>(
+                      tween: Tween<double>(end: innerScale),
+                      duration: const Duration(milliseconds: 420),
+                      curve: Curves.easeInOut,
+                      builder: (context, value, child) {
+                        final size = 200 * value;
+                        return Container(
+                          width: size,
+                          height: size,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: innerColor.withOpacity(0.9),
+                            boxShadow: [
+                              BoxShadow(
+                                color: innerColor.withOpacity(0.24),
+                                blurRadius: 20,
+                                spreadRadius: 4,
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _phaseLabel(_phase),
+                            style: Theme.of(context).textTheme.titleLarge
+                                ?.copyWith(color: Colors.white),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '$_remainingSeconds',
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(color: Colors.white),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -1887,6 +2096,39 @@ class _HomePageState extends State<HomePage> {
                     icon: const Icon(Icons.upload_file),
                     label: Text(t('importLocalAudio')),
                   ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  t('colorScheme'),
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<VisualScheme>(
+                  value: widget.visualScheme,
+                  items: VisualScheme.values
+                      .map(
+                        (scheme) => DropdownMenuItem(
+                          value: scheme,
+                          child: Text(_visualSchemeLabel(scheme)),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value == null) {
+                      return;
+                    }
+                    unawaited(widget.onVisualSchemeChanged(value));
+                  },
                 ),
               ],
             ),
